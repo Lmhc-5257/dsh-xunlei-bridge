@@ -28,13 +28,25 @@
 
 ## 📦 安装
 
-```bash
-# 从 GitHub 装（换成你的用户名）
-dsh plugin --profile web add github:你的用户名/dsh-xunlei-bridge
+三种方式，按你的网络情况选：
 
-# 或本地目录装（开发调试）
-dsh plugin --profile web add ./
+```bash
+# ① 标准方式（需要能访问 github.com，且 PATH 上有 git）
+dsh plugin --profile web add github:Lmhc-5257/dsh-xunlei-bridge
+
+# ② github.com 被墙 / 只有 codeload 能通时用这个（本机实测可用）
+dsh plugin --profile web add https://codeload.github.com/Lmhc-5257/dsh-xunlei-bridge/tar.gz/refs/heads/main
+
+# ③ 本地目录装（开发调试）
+dsh plugin --profile web add C:/Users/<你>/dsh-xunlei-bridge
 ```
+
+> ⚠️ **路径不要带空格**：`dsh plugin` 转发 pnpm 时不做引号处理，路径里有空格会被截断
+> （实测 `...\DeepSeek Harness-ai\...` 被截成 `...\DeepSeek`，报 `ERR_PNPM_NOT_PACKAGE_DIRECTORY`）。
+>
+> ⚠️ **方式①的两个前提**：`git` 必须在 PATH 上（pnpm 要用 `git ls-remote` 解析），
+> 且 `github.com:443` 可达。本机实测 `github.com` 连接被拒、`codeload.github.com` 正常，
+> 所以方式②才是本机可用的那条。
 
 装完**重启 dsh web**，宿主日志里应出现：
 
@@ -51,6 +63,8 @@ dsh plugin --profile web add ./
 | `blockOriginDownload` | `false` | `false`=DSH 照旧下载，同时给迅雷一份（双路兜底）；`true`=拦下 DSH 自己的下载，只走迅雷 |
 | `dryRun` | `false` | `true`=只写日志不真唤起迅雷，排障用 |
 | `dedupeSeconds` | `600` | 同一链接的去重窗口，避免重复提交 |
+| `logFile` | 未设置 | 设置后每转发一个链接就往该文件追加一行审计记录（`forwarded` / `dry-run` / `spawn-error`），用于事后核对 |
+| `ignoreTools` | `['xunlei_download']` | 不参与拦截的工具名。**与 `@local/dsh-xunlei-download` 共存时必须保留**：那个插件注册的 `xunlei_download` 工具自己会提交迅雷，再被本插件抓一遍会在迅雷里出现两个一样的任务 |
 
 ### 什么算「下载链接」
 
