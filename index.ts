@@ -23,6 +23,9 @@ const HERE = dirname(fileURLToPath(import.meta.url))
 /** 迅雷主窗口隐藏器（随包分发的 PowerShell 脚本）。 */
 const HIDER_SCRIPT = join(HERE, '..', 'bin', 'hide-thunder-main.ps1')
 
+/** 无界面提交器：把「新建任务」对话框设透明并点掉「立即下载」。 */
+const SUBMIT_SCRIPT = join(HERE, '..', 'bin', 'submit-thunder-task.ps1')
+
 /** 门控决策：与 DSH 的 PreToolDecision 形状一致。 */
 interface PreToolDecision {
   kind: 'allow' | 'deny' | 'ask'
@@ -87,6 +90,14 @@ export interface XunleiBridgeConfig {
    * 实测：迅雷还会同时弹「新建任务」对话框，它是独立窗口，不会被隐藏。
    */
   hideMainWindow?: boolean
+  /**
+   * 是否**无界面提交**（默认 true）。
+   * true = 提交后把「新建任务」对话框设成几乎全透明并自动点「立即下载」，
+   *        用户屏幕上完全看不到迅雷界面，任务直接开始下载；
+   * false = 保留对话框，让用户自己确认保存路径再点下载。
+   * 打开时 hideMainWindow 自动一并生效（脚本里会顺带隐藏主窗口）。
+   */
+  silentSubmit?: boolean
 }
 
 /** 名字里带这些词的工具有自己的下载通道，一律不拦。 */
@@ -189,6 +200,7 @@ export function apply(ctx: CtxLike, config: XunleiBridgeConfig = {}): void {
   const logFile = config.logFile
   const ignoreTools = new Set(config.ignoreTools ?? ['xunlei_download'])
   const hideMainWindow = config.hideMainWindow ?? true
+  const silentSubmit = config.silentSubmit ?? true
 
   /** 追加一行审计日志（失败不影响主流程）。 */
   function audit(line: string): void {
@@ -239,23 +251,33 @@ export function apply(ctx: CtxLike, config: XunleiBridgeConfig = {}): void {
     })
   }
 
-  /** 后台跑一次隐藏器（不阻塞工具调用）。 */
-  function runHider(): void {
+  /** 后台跑一个 PowerShell 助手脚本（不阻塞工具调用）。 */
+  function runHelper(scriptPath: string, extraArgs: string[], label: string): void {
     try {
       const child = spawn(
         'powershell.exe',
-        ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', HIDER_SCRIPT, '-Seconds', '12'],
+        ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, ...extraArgs],
         { detached: true, stdio: 'ignore', windowsHide: true },
       )
       child.on('error', (err: Error) => {
-        log?.warn?.(`[dsh-xunlei-bridge] 隐藏迅雷主窗口失败：${err.message}`)
+        log?.warn?.(`[dsh-xunlei-bridge] ${label}失败：${err.message}`)
       })
       child.unref()
     } catch (err) {
       log?.warn?.(
-        `[dsh-xunlei-bridge] 隐藏迅雷主窗口异常：${err instanceof Error ? err.message : String(err)}`,
+        `[dsh-xunlei-bridge] ${label}异常：${err instanceof Error ? err.message : String(err)}`,
       )
     }
+  }
+
+  /** 后台跑一次隐藏器（不阻塞工具调用）。 */
+  function runHider(): void {
+    runHelper(HIDER_SCRIPT, ['-Seconds', '12'], '隐藏迅雷主窗口')
+  }
+
+  /** 后台跑一次「无界面提交」：定位对话框 → 设透明 → 点「立即下载」。 */
+  function runSilentSubmit(): void {
+    runHelper(SUBMIT_SCRIPT, ['-Seconds', '15'], '无界面提交迅雷任务')
   }
 
   /** 唤起迅雷新建任务。失败只记日志，绝不影响原工具调用。 */
@@ -311,12 +333,18 @@ export function apply(ctx: CtxLike, config: XunleiBridgeConfig = {}): void {
             recent.set(url, now)
             fresh.push(url)
           }
-          // 先看迅雷主窗口本来是否可见：没开才需要隐藏，开着的别抢
-          const wasVisible = hideMainWindow ? await queryMainWindow() : true
+          // 无界面提交模式：不需要预先查主窗口，交给提交脚本统一处理
+          const wasVisible =
+            !silentSubmit && hideMainWindow ? await queryMainWindow() : true
           for (const url of fresh) forward(url)
-          if (hideMainWindow && !wasVisible && fresh.length > 0 && !dryRun) {
-            runHider()
-            audit('hide-main-window')
+          if (!dryRun && fresh.length > 0) {
+            if (silentSubmit) {
+              runSilentSubmit()
+              audit('silent-submit')
+            } else if (hideMainWindow && !wasVisible) {
+              runHider()
+              audit('hide-main-window')
+            }
           }
 
           if (blockOriginDownload && fresh.length > 0) {
@@ -345,7 +373,7 @@ export function apply(ctx: CtxLike, config: XunleiBridgeConfig = {}): void {
   )
 
   say(
-    `已加载：mode=${mode} dryRun=${dryRun} blockOriginDownload=${blockOriginDownload} hideMainWindow=${hideMainWindow} 迅雷=${thunderPath}`,
+    `已加载：mode=${mode} dryRun=${dryRun} blockOriginDownload=${blockOriginDownload} hideMainWindow=${hideMainWindow} silentSubmit=${silentSubmit} 迅雷=${thunderPath}`,
   )
 }
 

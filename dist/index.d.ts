@@ -63,6 +63,14 @@ export interface XunleiBridgeConfig {
      * 实测：迅雷还会同时弹「新建任务」对话框，它是独立窗口，不会被隐藏。
      */
     hideMainWindow?: boolean;
+    /**
+     * 是否**无界面提交**（默认 true）。
+     * true = 提交后把「新建任务」对话框设成几乎全透明并自动点「立即下载」，
+     *        用户屏幕上完全看不到迅雷界面，任务直接开始下载；
+     * false = 保留对话框，让用户自己确认保存路径再点下载。
+     * 打开时 hideMainWindow 自动一并生效（脚本里会顺带隐藏主窗口）。
+     */
+    silentSubmit?: boolean;
 }
 /** 判断一个 URL 是否值得交给迅雷。 */
 declare function looksDownloadable(url: string, mode: 'download-commands' | 'all-urls'): boolean;

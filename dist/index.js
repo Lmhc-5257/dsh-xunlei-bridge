@@ -19,6 +19,8 @@ import { dirname, join } from 'node:path';
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** 迅雷主窗口隐藏器（随包分发的 PowerShell 脚本）。 */
 const HIDER_SCRIPT = join(HERE, '..', 'bin', 'hide-thunder-main.ps1');
+/** 无界面提交器：把「新建任务」对话框设透明并点掉「立即下载」。 */
+const SUBMIT_SCRIPT = join(HERE, '..', 'bin', 'submit-thunder-task.ps1');
 /** cordis 插件名：DSH 加载插件时必须读到它。 */
 export const name = 'dsh-xunlei-bridge';
 /**
@@ -117,6 +119,7 @@ export function apply(ctx, config = {}) {
     const logFile = config.logFile;
     const ignoreTools = new Set(config.ignoreTools ?? ['xunlei_download']);
     const hideMainWindow = config.hideMainWindow ?? true;
+    const silentSubmit = config.silentSubmit ?? true;
     /** 追加一行审计日志（失败不影响主流程）。 */
     function audit(line) {
         if (logFile === undefined || logFile === '')
@@ -161,18 +164,26 @@ export function apply(ctx, config = {}) {
             }
         });
     }
-    /** 后台跑一次隐藏器（不阻塞工具调用）。 */
-    function runHider() {
+    /** 后台跑一个 PowerShell 助手脚本（不阻塞工具调用）。 */
+    function runHelper(scriptPath, extraArgs, label) {
         try {
-            const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', HIDER_SCRIPT, '-Seconds', '12'], { detached: true, stdio: 'ignore', windowsHide: true });
+            const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, ...extraArgs], { detached: true, stdio: 'ignore', windowsHide: true });
             child.on('error', (err) => {
-                log?.warn?.(`[dsh-xunlei-bridge] 隐藏迅雷主窗口失败：${err.message}`);
+                log?.warn?.(`[dsh-xunlei-bridge] ${label}失败：${err.message}`);
             });
             child.unref();
         }
         catch (err) {
-            log?.warn?.(`[dsh-xunlei-bridge] 隐藏迅雷主窗口异常：${err instanceof Error ? err.message : String(err)}`);
+            log?.warn?.(`[dsh-xunlei-bridge] ${label}异常：${err instanceof Error ? err.message : String(err)}`);
         }
+    }
+    /** 后台跑一次隐藏器（不阻塞工具调用）。 */
+    function runHider() {
+        runHelper(HIDER_SCRIPT, ['-Seconds', '12'], '隐藏迅雷主窗口');
+    }
+    /** 后台跑一次「无界面提交」：定位对话框 → 设透明 → 点「立即下载」。 */
+    function runSilentSubmit() {
+        runHelper(SUBMIT_SCRIPT, ['-Seconds', '15'], '无界面提交迅雷任务');
     }
     /** 唤起迅雷新建任务。失败只记日志，绝不影响原工具调用。 */
     function forward(url) {
@@ -224,13 +235,19 @@ export function apply(ctx, config = {}) {
                     recent.set(url, now);
                     fresh.push(url);
                 }
-                // 先看迅雷主窗口本来是否可见：没开才需要隐藏，开着的别抢
-                const wasVisible = hideMainWindow ? await queryMainWindow() : true;
+                // 无界面提交模式：不需要预先查主窗口，交给提交脚本统一处理
+                const wasVisible = !silentSubmit && hideMainWindow ? await queryMainWindow() : true;
                 for (const url of fresh)
                     forward(url);
-                if (hideMainWindow && !wasVisible && fresh.length > 0 && !dryRun) {
-                    runHider();
-                    audit('hide-main-window');
+                if (!dryRun && fresh.length > 0) {
+                    if (silentSubmit) {
+                        runSilentSubmit();
+                        audit('silent-submit');
+                    }
+                    else if (hideMainWindow && !wasVisible) {
+                        runHider();
+                        audit('hide-main-window');
+                    }
                 }
                 if (blockOriginDownload && fresh.length > 0) {
                     decision = {
@@ -257,7 +274,7 @@ export function apply(ctx, config = {}) {
         }
         return decision;
     });
-    say(`已加载：mode=${mode} dryRun=${dryRun} blockOriginDownload=${blockOriginDownload} hideMainWindow=${hideMainWindow} 迅雷=${thunderPath}`);
+    say(`已加载：mode=${mode} dryRun=${dryRun} blockOriginDownload=${blockOriginDownload} hideMainWindow=${hideMainWindow} silentSubmit=${silentSubmit} 迅雷=${thunderPath}`);
 }
 /** 供宿主自检/单测使用的内部工具（不属于 cordis 接口）。 */
 export const __internal = {
