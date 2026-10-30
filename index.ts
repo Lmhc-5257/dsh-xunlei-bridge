@@ -12,8 +12,16 @@
  *   一旦 import 外部包，整个 profile 会启动失败（本机其它插件同样遵循此规则）。
  */
 
-import { spawn } from 'node:child_process'
+import { spawn, execFile } from 'node:child_process'
 import { appendFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
+
+/** 本文件所在目录（编译后在 dist/，源码时在包根）。 */
+const HERE = dirname(fileURLToPath(import.meta.url))
+
+/** 迅雷主窗口隐藏器（随包分发的 PowerShell 脚本）。 */
+const HIDER_SCRIPT = join(HERE, '..', 'bin', 'hide-thunder-main.ps1')
 
 /** 门控决策：与 DSH 的 PreToolDecision 形状一致。 */
 interface PreToolDecision {
@@ -73,6 +81,12 @@ export interface XunleiBridgeConfig {
    * 如果再被本插件抓一遍，同一个链接会出现两个迅雷任务。
    */
   ignoreTools?: string[]
+  /**
+   * 是否在提交任务时隐藏迅雷主界面（默认 true）。
+   * 只在「提交前主窗口本来没开」时才隐藏，不会抢走用户正开着的窗口。
+   * 实测：迅雷还会同时弹「新建任务」对话框，它是独立窗口，不会被隐藏。
+   */
+  hideMainWindow?: boolean
 }
 
 /** 名字里带这些词的工具有自己的下载通道，一律不拦。 */
@@ -174,6 +188,7 @@ export function apply(ctx: CtxLike, config: XunleiBridgeConfig = {}): void {
   const dedupeMs = (config.dedupeSeconds ?? 600) * 1000
   const logFile = config.logFile
   const ignoreTools = new Set(config.ignoreTools ?? ['xunlei_download'])
+  const hideMainWindow = config.hideMainWindow ?? true
 
   /** 追加一行审计日志（失败不影响主流程）。 */
   function audit(line: string): void {
@@ -194,6 +209,52 @@ export function apply(ctx: CtxLike, config: XunleiBridgeConfig = {}): void {
   function pruneRecent(now: number): void {
     for (const [url, at] of recent) {
       if (now - at > dedupeMs) recent.delete(url)
+    }
+  }
+
+  /**
+   * 查询迅雷主窗口当前是否可见。
+   * 退出码 0 = 可见；3 = 不可见；其它（脚本缺失/超时）= 当成「可见」，
+   * 也就是保守起来不隐藏，避免误抢用户窗口。
+   */
+  function queryMainWindow(): Promise<boolean> {
+    return new Promise((resolve) => {
+      try {
+        execFile(
+          'powershell.exe',
+          ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', HIDER_SCRIPT, '-Query'],
+          { windowsHide: true, timeout: 10000 },
+          (err) => {
+            if (err && (err as NodeJS.ErrnoException & { code?: number }).code === 3) {
+              resolve(false)
+              return
+            }
+            if (err) resolve(true)
+            else resolve(true)
+          },
+        )
+      } catch {
+        resolve(true)
+      }
+    })
+  }
+
+  /** 后台跑一次隐藏器（不阻塞工具调用）。 */
+  function runHider(): void {
+    try {
+      const child = spawn(
+        'powershell.exe',
+        ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', HIDER_SCRIPT, '-Seconds', '12'],
+        { detached: true, stdio: 'ignore', windowsHide: true },
+      )
+      child.on('error', (err: Error) => {
+        log?.warn?.(`[dsh-xunlei-bridge] 隐藏迅雷主窗口失败：${err.message}`)
+      })
+      child.unref()
+    } catch (err) {
+      log?.warn?.(
+        `[dsh-xunlei-bridge] 隐藏迅雷主窗口异常：${err instanceof Error ? err.message : String(err)}`,
+      )
     }
   }
 
@@ -250,7 +311,13 @@ export function apply(ctx: CtxLike, config: XunleiBridgeConfig = {}): void {
             recent.set(url, now)
             fresh.push(url)
           }
+          // 先看迅雷主窗口本来是否可见：没开才需要隐藏，开着的别抢
+          const wasVisible = hideMainWindow ? await queryMainWindow() : true
           for (const url of fresh) forward(url)
+          if (hideMainWindow && !wasVisible && fresh.length > 0 && !dryRun) {
+            runHider()
+            audit('hide-main-window')
+          }
 
           if (blockOriginDownload && fresh.length > 0) {
             decision = {
@@ -278,7 +345,7 @@ export function apply(ctx: CtxLike, config: XunleiBridgeConfig = {}): void {
   )
 
   say(
-    `已加载：mode=${mode} dryRun=${dryRun} blockOriginDownload=${blockOriginDownload} 迅雷=${thunderPath}`,
+    `已加载：mode=${mode} dryRun=${dryRun} blockOriginDownload=${blockOriginDownload} hideMainWindow=${hideMainWindow} 迅雷=${thunderPath}`,
   )
 }
 

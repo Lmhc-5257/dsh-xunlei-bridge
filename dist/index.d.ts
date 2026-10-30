@@ -57,6 +57,12 @@ export interface XunleiBridgeConfig {
      * 如果再被本插件抓一遍，同一个链接会出现两个迅雷任务。
      */
     ignoreTools?: string[];
+    /**
+     * 是否在提交任务时隐藏迅雷主界面（默认 true）。
+     * 只在「提交前主窗口本来没开」时才隐藏，不会抢走用户正开着的窗口。
+     * 实测：迅雷还会同时弹「新建任务」对话框，它是独立窗口，不会被隐藏。
+     */
+    hideMainWindow?: boolean;
 }
 /** 判断一个 URL 是否值得交给迅雷。 */
 declare function looksDownloadable(url: string, mode: 'download-commands' | 'all-urls'): boolean;

@@ -1,6 +1,6 @@
 {
   "name": "dsh-xunlei-bridge",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "DSH plugin: forward download links in tool calls to Xunlei (Windows only)",
   "type": "module",
   "main": "dist/index.js",
@@ -10,6 +10,7 @@
   },
   "files": [
     "dist",
+    "bin",
     "cordis.patch.yml",
     "README.md"
   ],

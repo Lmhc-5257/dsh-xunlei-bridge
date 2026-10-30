@@ -65,6 +65,30 @@ dsh plugin --profile web add C:/Users/<你>/dsh-xunlei-bridge
 | `dedupeSeconds` | `600` | 同一链接的去重窗口，避免重复提交 |
 | `logFile` | 未设置 | 设置后每转发一个链接就往该文件追加一行审计记录（`forwarded` / `dry-run` / `spawn-error`），用于事后核对 |
 | `ignoreTools` | `['xunlei_download']` | 不参与拦截的工具名。**与 `@local/dsh-xunlei-download` 共存时必须保留**：那个插件注册的 `xunlei_download` 工具自己会提交迅雷，再被本插件抓一遍会在迅雷里出现两个一样的任务 |
+| `hideMainWindow` | `true` | 提交任务时把**迅雷主界面**藏起来，只留「新建任务」对话框。**只在主窗口本来没开时才藏**，用户正开着的窗口不会被抢走 |
+
+### 「不弹主界面」是怎么做到的
+
+两条腿一起走，缺一条都能被迅雷的版本差异打穿：
+
+1. **官方开关（辅助）**：`<迅雷>\Profiles\config.json` 里
+   `TaskDefaultSettings.NewTaskDlgWithoutMainWnd = true`。
+   注意这是**机器级**设置，迅雷退出时可能把它写回 `false`，升级也可能改键名，所以只当辅助。
+2. **窗口兜底（主保证）**：插件随包分发 `bin/hide-thunder-main.ps1`，提交任务后
+   轮询并 `ShowWindow(SW_HIDE)` 掉迅雷主窗口（判定：类名 `Chrome_WidgetWin_0` 且标题为「迅雷」，
+   或宽度 ≥ 900 的 CEF 大窗口），**不匹配** 680 宽的「新建任务」对话框。隐藏而非关闭，
+   用户仍可从托盘还原。
+
+提交前会先用 `-Query` 查一次主窗口是否已经可见：
+**可见 → 不动它**（不抢用户正在用的窗口）；**不可见 → 藏起来**（防止迅雷把它带出来）。
+
+> 实测（Windows 11 + 迅雷 25.1.13.1637）：主窗口 `1082x722`、标题恰好「迅雷」；
+> 「新建任务」对话框 `680x396`（展开态 `680x683`）；另一个常驻的
+> `suspension-renderer`（`810x694`）**不是**主窗口，不会被动。
+>
+> ⚠️ `hide-thunder-main.ps1` **故意写成纯 ASCII**：中文窗口名用码点（`U+8FC5 U+96F7`）拼，
+> 注释用英文。因为 Windows PowerShell 5.1 会把 UTF-8 无 BOM 的文件按 ANSI 解码，
+> 带中文的脚本会直接语法报错。
 
 ### 什么算「下载链接」
 

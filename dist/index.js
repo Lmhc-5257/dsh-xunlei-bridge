@@ -11,8 +11,14 @@
  *   插件以 link: / git: 方式装进 profile 时自身没有可解析的 node_modules，
  *   一旦 import 外部包，整个 profile 会启动失败（本机其它插件同样遵循此规则）。
  */
-import { spawn } from 'node:child_process';
+import { spawn, execFile } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+/** 本文件所在目录（编译后在 dist/，源码时在包根）。 */
+const HERE = dirname(fileURLToPath(import.meta.url));
+/** 迅雷主窗口隐藏器（随包分发的 PowerShell 脚本）。 */
+const HIDER_SCRIPT = join(HERE, '..', 'bin', 'hide-thunder-main.ps1');
 /** cordis 插件名：DSH 加载插件时必须读到它。 */
 export const name = 'dsh-xunlei-bridge';
 /**
@@ -110,6 +116,7 @@ export function apply(ctx, config = {}) {
     const dedupeMs = (config.dedupeSeconds ?? 600) * 1000;
     const logFile = config.logFile;
     const ignoreTools = new Set(config.ignoreTools ?? ['xunlei_download']);
+    const hideMainWindow = config.hideMainWindow ?? true;
     /** 追加一行审计日志（失败不影响主流程）。 */
     function audit(line) {
         if (logFile === undefined || logFile === '')
@@ -128,6 +135,43 @@ export function apply(ctx, config = {}) {
         for (const [url, at] of recent) {
             if (now - at > dedupeMs)
                 recent.delete(url);
+        }
+    }
+    /**
+     * 查询迅雷主窗口当前是否可见。
+     * 退出码 0 = 可见；3 = 不可见；其它（脚本缺失/超时）= 当成「可见」，
+     * 也就是保守起来不隐藏，避免误抢用户窗口。
+     */
+    function queryMainWindow() {
+        return new Promise((resolve) => {
+            try {
+                execFile('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', HIDER_SCRIPT, '-Query'], { windowsHide: true, timeout: 10000 }, (err) => {
+                    if (err && err.code === 3) {
+                        resolve(false);
+                        return;
+                    }
+                    if (err)
+                        resolve(true);
+                    else
+                        resolve(true);
+                });
+            }
+            catch {
+                resolve(true);
+            }
+        });
+    }
+    /** 后台跑一次隐藏器（不阻塞工具调用）。 */
+    function runHider() {
+        try {
+            const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', HIDER_SCRIPT, '-Seconds', '12'], { detached: true, stdio: 'ignore', windowsHide: true });
+            child.on('error', (err) => {
+                log?.warn?.(`[dsh-xunlei-bridge] 隐藏迅雷主窗口失败：${err.message}`);
+            });
+            child.unref();
+        }
+        catch (err) {
+            log?.warn?.(`[dsh-xunlei-bridge] 隐藏迅雷主窗口异常：${err instanceof Error ? err.message : String(err)}`);
         }
     }
     /** 唤起迅雷新建任务。失败只记日志，绝不影响原工具调用。 */
@@ -180,8 +224,14 @@ export function apply(ctx, config = {}) {
                     recent.set(url, now);
                     fresh.push(url);
                 }
+                // 先看迅雷主窗口本来是否可见：没开才需要隐藏，开着的别抢
+                const wasVisible = hideMainWindow ? await queryMainWindow() : true;
                 for (const url of fresh)
                     forward(url);
+                if (hideMainWindow && !wasVisible && fresh.length > 0 && !dryRun) {
+                    runHider();
+                    audit('hide-main-window');
+                }
                 if (blockOriginDownload && fresh.length > 0) {
                     decision = {
                         kind: 'deny',
@@ -207,7 +257,7 @@ export function apply(ctx, config = {}) {
         }
         return decision;
     });
-    say(`已加载：mode=${mode} dryRun=${dryRun} blockOriginDownload=${blockOriginDownload} 迅雷=${thunderPath}`);
+    say(`已加载：mode=${mode} dryRun=${dryRun} blockOriginDownload=${blockOriginDownload} hideMainWindow=${hideMainWindow} 迅雷=${thunderPath}`);
 }
 /** 供宿主自检/单测使用的内部工具（不属于 cordis 接口）。 */
 export const __internal = {

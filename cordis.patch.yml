@@ -19,3 +19,6 @@
         # true = 只记日志不真唤起迅雷，用于排障
         dryRun: false
         dedupeSeconds: 600
+        # true = 提交任务时顺手把迅雷主界面藏起来，只留「新建任务」对话框。
+        # 只在主窗口本来没开时才藏，不会抢走你正开着的窗口。
+        hideMainWindow: true
