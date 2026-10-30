@@ -1,0 +1,37 @@
+{
+  "name": "dsh-xunlei-bridge",
+  "version": "1.0.0",
+  "description": "DSH plugin: forward download links in tool calls to Xunlei (Windows only)",
+  "type": "module",
+  "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.4.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh": "*"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh": {
+      "optional": true
+    }
+  },
+  "license": "MIT"
+}

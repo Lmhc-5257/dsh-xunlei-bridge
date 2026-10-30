@@ -1,0 +1,21 @@
+# dsh-xunlei-bridge 的 profile 补丁
+#
+# 这个文件是**必需的**：DSH 只把声明了 `dsh.bundle.patch` 的包当作插件层加载。
+# 没有它，`dsh plugin add` 会把本包装成普通依赖并打印
+# "declares no dsh.bundle — installed as a plain dependency, not a profile layer"，
+# 插件永远不会运行。
+#
+# 要改配置就改下面 config: 里的值（改完重启 dsh web）。
+- insert:
+    - id: dsh-xunlei-bridge
+      name: 'dsh-xunlei-bridge'
+      config:
+        # 本机实测路径（注意用户机器在 D 盘）
+        thunderPath: 'D:\Program Files (x86)\Thunder Network\Thunder\program\Thunder.exe'
+        # download-commands = 只认下载类命令；all-urls = 抓所有链接
+        mode: download-commands
+        # false = DSH 照旧下载，同时把链接丢给迅雷做备份；true = 只走迅雷
+        blockOriginDownload: false
+        # true = 只记日志不真唤起迅雷，用于排障
+        dryRun: false
+        dedupeSeconds: 600
